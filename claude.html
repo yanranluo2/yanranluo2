@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bouncing Ball in 4D Tesseract</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        #canvas {
+            background-color: #000;
+            border-radius: 8px;
+        }
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+        }
+        .slider-container {
+            margin: 10px 0;
+        }
+        label {
+            display: inline-block;
+            width: 100px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="800" height="600"></canvas>
+    
+    <div class="controls">
+        <h3>Tesseract Controls</h3>
+        <div class="slider-container">
+            <label for="rotationSpeedXY">XY Rotation:</label>
+            <input type="range" id="rotationSpeedXY" min="0" max="0.05" step="0.001" value="0.01">
+        </div>
+        <div class="slider-container">
+            <label for="rotationSpeedXZ">XZ Rotation:</label>
+            <input type="range" id="rotationSpeedXZ" min="0" max="0.05" step="0.001" value="0.005">
+        </div>
+        <div class="slider-container">
+            <label for="rotationSpeedXW">XW Rotation:</label>
+            <input type="range" id="rotationSpeedXW" min="0" max="0.05" step="0.001" value="0.007">
+        </div>
+        <div class="slider-container">
+            <label for="rotationSpeedYZ">YZ Rotation:</label>
+            <input type="range" id="rotationSpeedYZ" min="0" max="0.05" step="0.001" value="0.003">
+        </div>
+        <div class="slider-container">
+            <label for="rotationSpeedYW">YW Rotation:</label>
+            <input type="range" id="rotationSpeedYW" min="0" max="0.05" step="0.001" value="0.008">
+        </div>
+        <div class="slider-container">
+            <label for="rotationSpeedZW">ZW Rotation:</label>
+            <input type="range" id="rotationSpeedZW" min="0" max="0.05" step="0.001" value="0.004">
+        </div>
+        <div class="slider-container">
+            <label for="ballSpeed">Ball Speed:</label>
+            <input type="range" id="ballSpeed" min="0.001" max="0.02" step="0.001" value="0.005">
+        </div>
+    </div>
+
+    <script>
+        // Get canvas and context
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Control variables
+        let rotationSpeedXY = 0.01;
+        let rotationSpeedXZ = 0.005;
+        let rotationSpeedXW = 0.007;
+        let rotationSpeedYZ = 0.003;
+        let rotationSpeedYW = 0.008;
+        let rotationSpeedZW = 0.004;
+        let ballSpeed = 0.005;
+        
+        // Update control values
+        document.getElementById('rotationSpeedXY').addEventListener('input', (e) => rotationSpeedXY = parseFloat(e.target.value));
+        document.getElementById('rotationSpeedXZ').addEventListener('input', (e) => rotationSpeedXZ = parseFloat(e.target.value));
+        document.getElementById('rotationSpeedXW').addEventListener('input', (e) => rotationSpeedXW = parseFloat(e.target.value));
+        document.getElementById('rotationSpeedYZ').addEventListener('input', (e) => rotationSpeedYZ = parseFloat(e.target.value));
+        document.getElementById('rotationSpeedYW').addEventListener('input', (e) => rotationSpeedYW = parseFloat(e.target.value));
+        document.getElementById('rotationSpeedZW').addEventListener('input', (e) => rotationSpeedZW = parseFloat(e.target.value));
+        document.getElementById('ballSpeed').addEventListener('input', (e) => ballSpeed = parseFloat(e.target.value));
+        
+        // Constants
+        const TESSERACT_SIZE = 1;
+        const BALL_RADIUS = 0.08;
+        const SCALE = 200;
+        const PERSPECTIVE_DISTANCE = 2;
+        const COLLISION_HIGHLIGHT_DURATION = 50; // frames
+        
+        // Tesseract vertices in 4D (x, y, z, w)
+        // A tesseract has 16 vertices (2^4)
+        const vertices = [
+            [-1, -1, -1, -1], [1, -1, -1, -1], [1, 1, -1, -1], [-1, 1, -1, -1],
+            [-1, -1, 1, -1], [1, -1, 1, -1], [1, 1, 1, -1], [-1, 1, 1, -1],
+            [-1, -1, -1, 1], [1, -1, -1, 1], [1, 1, -1, 1], [-1, 1, -1, 1],
+            [-1, -1, 1, 1], [1, -1, 1, 1], [1, 1, 1, 1], [-1, 1, 1, 1]
+        ].map(v => v.map(coord => coord * TESSERACT_SIZE / 2));
+        
+        // Edges of the tesseract
+        const edges = [
+            // Edges of the first cube (w = -1)
+            [0, 1], [1, 2], [2, 3], [3, 0],
+            [4, 5], [5, 6], [6, 7], [7, 4],
+            [0, 4], [1, 5], [2, 6], [3, 7],
+            
+            // Edges of the second cube (w = 1)
+            [8, 9], [9, 10], [10, 11], [11, 8],
+            [12, 13], [13, 14], [14, 15], [15, 12],
+            [8, 12], [9, 13], [10, 14], [11, 15],
+            
+            // Edges connecting the two cubes
+            [0, 8], [1, 9], [2, 10], [3, 11],
+            [4, 12], [5, 13], [6, 14], [7, 15]
+        ];
+        
+        // Cube faces (each face is defined by 4 vertices)
+        const faces = [
+            // Faces of the first cube (w = -1)
+            [0, 1, 2, 3], // bottom face (z = -1)
+            [4, 5, 6, 7], // top face (z = 1)
+            [0, 1, 5, 4], // back face (y = -1)
+            [2, 3, 7, 6], // front face (y = 1)
+            [0, 3, 7, 4], // left face (x = -1)
+            [1, 2, 6, 5], // right face (x = 1)
+            
+            // Faces of the second cube (w = 1)
+            [8, 9, 10, 11], // bottom face (z = -1)
+            [12, 13, 14, 15], // top face (z = 1)
+            [8, 9, 13, 12], // back face (y = -1)
+            [10, 11, 15, 14], // front face (y = 1)
+            [8, 11, 15, 12], // left face (x = -1)
+            [9, 10, 14, 13], // right face (x = 1)
+            
+            // Faces connecting the two cubes (4D faces)
+            [0, 1, 9, 8], // (z = -1, y = -1)
+            [2, 3, 11, 10], // (z = -1, y = 1)
+            [4, 5, 13, 12], // (z = 1, y = -1)
+            [6, 7, 15, 14], // (z = 1, y = 1)
+            [0, 3, 11, 8], // (z = -1, x = -1)
+            [1, 2, 10, 9], // (z = -1, x = 1)
+            [4, 7, 15, 12], // (z = 1, x = -1)
+            [5, 6, 14, 13], // (z = 1, x = 1)
+            [0, 4, 12, 8], // (x = -1, y = -1)
+            [1, 5, 13, 9], // (x = 1, y = -1)
+            [2, 6, 14, 10], // (x = 1, y = 1)
+            [3, 7, 15, 11]  // (x = -1, y = 1)
+        ];
+        
+        // Ball position and velocity in 4D
+        const ball = {
+            position: [0, 0, 0, 0],
+            velocity: [Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5],
+            normalizeVelocity() {
+                const magnitude = Math.sqrt(
+                    this.velocity[0] * this.velocity[0] + 
+                    this.velocity[1] * this.velocity[1] + 
+                    this.velocity[2] * this.velocity[2] + 
+                    this.velocity[3] * this.velocity[3]
+                );
+                this.velocity = this.velocity.map(v => v / magnitude * ballSpeed);
+            }
+        };
+        
+        // Normalize the initial velocity
+        ball.normalizeVelocity();
+        
+        // Keep track of collisions for highlighting
+        const collisionHighlights = [];
+        
+        // Rotation matrices for different planes
+        function rotateXY(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x * cos - y * sin,
+                x * sin + y * cos,
+                z,
+                w
+            ];
+        }
+        
+        function rotateXZ(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x * cos - z * sin,
+                y,
+                x * sin + z * cos,
+                w
+            ];
+        }
+        
+        function rotateXW(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x * cos - w * sin,
+                y,
+                z,
+                x * sin + w * cos
+            ];
+        }
+        
+        function rotateYZ(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x,
+                y * cos - z * sin,
+                y * sin + z * cos,
+                w
+            ];
+        }
+        
+        function rotateYW(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x,
+                y * cos - w * sin,
+                z,
+                y * sin + w * cos
+            ];
+        }
+        
+        function rotateZW(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x,
+                y,
+                z * cos - w * sin,
+                z * sin + w * cos
+            ];
+        }
+        
+        // Project a 4D point to 3D using perspective projection
+        function project4Dto3D(point) {
+            const [x, y, z, w] = point;
+            const distance = PERSPECTIVE_DISTANCE;
+            const factor = distance / (distance + w);
+            return [x * factor, y * factor, z * factor];
+        }
+        
+        // Project a 3D point to 2D using perspective projection
+        function project3Dto2D(point) {
+            const [x, y, z] = point;
+            const distance = PERSPECTIVE_DISTANCE;
+            const factor = distance / (distance - z);
+            return [x * factor, y * factor];
+        }
+        
+        // Check for collision between the ball and tesseract boundaries
+        function checkCollisions() {
+            const ballPos = ball.position;
+            const ballVel = ball.velocity;
+            const halfSize = TESSERACT_SIZE / 2;
+            
+            // Check collision with each dimension's boundaries
+            for (let d = 0; d < 4; d++) {
+                if (Math.abs(ballPos[d]) + BALL_RADIUS > halfSize) {
+                    // Collision detected
+                    const sign = Math.sign(ballPos[d]);
+                    
+                    // Prevent ball from going outside the tesseract
+                    ballPos[d] = sign * (halfSize - BALL_RADIUS);
+                    
+                    // Reflect velocity
+                    ballVel[d] = -ballVel[d];
+                    
+                    // Determine which face was hit and add to highlights
+                    // The face is determined by which dimension and in which direction
+                    let faceIndex = -1;
+                    
+                    if (d === 0) { // X dimension
+                        faceIndex = sign > 0 ? 5 : 4;
+                    } else if (d === 1) { // Y dimension
+                        faceIndex = sign > 0 ? 3 : 2;
+                    } else if (d === 2) { // Z dimension
+                        faceIndex = sign > 0 ? 1 : 0;
+                    } else if (d === 3) { // W dimension
+                        // For W dimension, we need to adjust the face index based on the other coordinates
+                        if (sign > 0) {
+                            // Second cube
+                            if (ballPos[2] < 0) {
+                                if (ballPos[1] < 0) {
+                                    if (ballPos[0] < 0) faceIndex = 16;
+                                    else faceIndex = 17;
+                                } else {
+                                    if (ballPos[0] < 0) faceIndex = 18;
+                                    else faceIndex = 19;
+                                }
+                            } else {
+                                if (ballPos[1] < 0) {
+                                    if (ballPos[0] < 0) faceIndex = 20;
+                                    else faceIndex = 21;
+                                } else {
+                                    if (ballPos[0] < 0) faceIndex = 22;
+                                    else faceIndex = 23;
+                                }
+                            }
+                        } else {
+                            // First cube
+                            if (ballPos[2] < 0) {
+                                faceIndex = ballPos[1] < 0 ? 0 : 3;
+                            } else {
+                                faceIndex = ballPos[1] < 0 ? 2 : 1;
+                            }
+                        }
+                    }
+                    
+                    // Add to highlights if face was identified
+                    if (faceIndex >= 0) {
+                        collisionHighlights.push({
+                            faceIndex,
+                            timer: COLLISION_HIGHLIGHT_DURATION
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Main animation loop
+        function animate() {
+            // Clear the canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Center the origin
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            
+            // Create copies of vertices for rotation
+            let rotatedVertices = [...vertices.map(v => [...v])];
+            
+            // Rotate vertices
+            rotatedVertices = rotatedVertices.map(point => {
+                point = rotateXY(point, rotationSpeedXY);
+                point = rotateXZ(point, rotationSpeedXZ);
+                point = rotateXW(point, rotationSpeedXW);
+                point = rotateYZ(point, rotationSpeedYZ);
+                point = rotateYW(point, rotationSpeedYW);
+                point = rotateZW(point, rotationSpeedZW);
+                return point;
+            });
+            
+            // Project vertices to 3D and then to 2D
+            const projectedVertices = rotatedVertices.map(vertex => {
+                const point3D = project4Dto3D(vertex);
+                const point2D = project3Dto2D(point3D);
+                return {
+                    x: point2D[0] * SCALE,
+                    y: point2D[1] * SCALE,
+                    z: point3D[2] // Keep z for depth sorting
+                };
+            });
+            
+            // Draw the ball
+            // First rotate and project the ball
+            let ballRotated = [...ball.position];
+            ballRotated = rotateXY(ballRotated, rotationSpeedXY);
+            ballRotated = rotateXZ(ballRotated, rotationSpeedXZ);
+            ballRotated = rotateXW(ballRotated, rotationSpeedXW);
+            ballRotated = rotateYZ(ballRotated, rotationSpeedYZ);
+            ballRotated = rotateYW(ballRotated, rotationSpeedYW);
+            ballRotated = rotateZW(ballRotated, rotationSpeedZW);
+            
+            const ball3D = project4Dto3D(ballRotated);
+            const ball2D = project3Dto2D(ball3D);
+            
+            // Calculate the projected ball radius
+            const ballFactor = PERSPECTIVE_DISTANCE / (PERSPECTIVE_DISTANCE - ball3D[2]);
+            const projectedBallRadius = BALL_RADIUS * SCALE * ballFactor;
+            
+            // Calculate face depths for sorting
+            const faceDepths = faces.map((face, index) => {
+                // Calculate center of the face
+                const centerX = face.reduce((sum, vertexIndex) => sum + rotatedVertices[vertexIndex][0], 0) / face.length;
+                const centerY = face.reduce((sum, vertexIndex) => sum + rotatedVertices[vertexIndex][1], 0) / face.length;
+                const centerZ = face.reduce((sum, vertexIndex) => sum + rotatedVertices[vertexIndex][2], 0) / face.length;
+                const centerW = face.reduce((sum, vertexIndex) => sum + rotatedVertices[vertexIndex][3], 0) / face.length;
+                
+                // Project to get depth
+                const center3D = project4Dto3D([centerX, centerY, centerZ, centerW]);
+                
+                return {
+                    index,
+                    depth: center3D[2]
+                };
+            });
+            
+            // Sort faces by depth
+            faceDepths.sort((a, b) => a.depth - b.depth);
+            
+            // Draw faces from back to front
+            faceDepths.forEach(({ index }) => {
+                const face = faces[index];
+                
+                // Check if this face has an active highlight
+                const highlight = collisionHighlights.find(h => h.faceIndex === index);
+                
+                ctx.beginPath();
+                ctx.moveTo(projectedVertices[face[0]].x, projectedVertices[face[0]].y);
+                for (let i = 1; i < face.length; i++) {
+                    ctx.lineTo(projectedVertices[face[i]].x, projectedVertices[face[i]].y);
+                }
+                ctx.closePath();
+                
+                // Determine face color based on highlight status
+                if (highlight) {
+                    const alpha = highlight.timer / COLLISION_HIGHLIGHT_DURATION;
+                    ctx.fillStyle = `rgba(255, 0, 0, ${alpha * 0.5})`;
+                } else {
+                    ctx.fillStyle = "rgba(100, 100, 255, 0.1)";
+                }
+                
+                ctx.strokeStyle = "rgba(150, 150, 255, 0.6)";
+                ctx.fill();
+                ctx.stroke();
+            });
+            
+            // Draw edges
+            ctx.strokeStyle = "rgba(200, 200, 255, 0.8)";
+            ctx.lineWidth = 1;
+            
+            edges.forEach(edge => {
+                const v1 = projectedVertices[edge[0]];
+                const v2 = projectedVertices[edge[1]];
+                
+                ctx.beginPath();
+                ctx.moveTo(v1.x, v1.y);
+                ctx.lineTo(v2.x, v2.y);
+                ctx.stroke();
+            });
+            
+            // Draw the ball
+            ctx.beginPath();
+            ctx.arc(ball2D[0] * SCALE, ball2D[1] * SCALE, projectedBallRadius, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+            ctx.fill();
+            ctx.strokeStyle = "black";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            // Reset transform
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            
+            // Update ball position
+            for (let i = 0; i < 4; i++) {
+                ball.position[i] += ball.velocity[i];
+            }
+            
+            // Check for collisions
+            checkCollisions();
+            
+            // Update collision highlights
+            for (let i = collisionHighlights.length - 1; i >= 0; i--) {
+                collisionHighlights[i].timer--;
+                if (collisionHighlights[i].timer <= 0) {
+                    collisionHighlights.splice(i, 1);
+                }
+            }
+            
+            // Continue animation
+            requestAnimationFrame(animate);
+        }
+        
+        // Start animation
+        animate();
+    </script>
+</body>
+</html>
